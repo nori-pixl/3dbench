@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>3Dベンチマーク 25種</title>
+    <style>
+        body { font-family: sans-serif; background: #050508; color: #fff; text-align: center; margin: 0; padding: 10px; overflow: hidden; }
+        h1 { font-size: 16px; margin: 5px; color: #00ffaa; }
+        .controls { background: rgba(255,255,255,0.03); max-width: 900px; margin: 0 auto 5px auto; padding: 6px; border-radius: 6px; display: flex; justify-content: space-around; align-items: center; gap: 5px; font-size: 11px; }
+        select, input, button { background: #0f111a; color: #fff; border: 1px solid #00ffaa; padding: 4px; border-radius: 4px; cursor: pointer; }
+        input { width: 80px; text-align: center; cursor: text; }
+        button:disabled { background: #333; color: #666; border-color: #444; cursor: not-allowed; }
+        #start { background: #00ffaa; color: #000; font-weight: bold; }
+        #canvasContainer { position: relative; width: 700px; height: 450px; margin: 0 auto; background: #000; border: 1px solid #333; }
+        canvas { display: block; width: 100%; height: 100%; }
+        #fps { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); padding: 8px; border-radius: 4px; font-family: monospace; font-size: 12px; color: #00ff00; text-align: left; }
+    </style>
+</head>
+<body>
+
+<h1>3D 演算ベンチマーク (25種・粒子数自由設定)</h1>
+<div class="controls">
+    <button id="start">演算スタート</button>
+    <div>
+        <label>モード：</label>
+        <select id="algo">
+            <option value="fluid">1. カオス流体</option>
+            <option value="lorenz">2. ローレンツ・アトラクタ</option>
+            <option value="blackhole">3. ブラックホール重力</option>
+            <option value="wave3d">4. 3D複合サイン波</option>
+            <option value="dna">5. DNA二重螺旋</option>
+            <option value="galaxy">6. 銀河渦巻き粒子</option>
+            <option value="cloth">7. 3D格子・布演算</option>
+            <option value="matrix">8. デジタル超立方体</option>
+            <option value="explosion">9. ビッグバン爆発</option>
+            <option value="tornado">10. 3D竜巻トルネード</option>
+            <option value="rossler">11. レスラー・アトラクタ</option>
+            <option value="clifford">12. クリフォード・アトラクタ</option>
+            <option value="heart">13. 3D数理ハート数式</option>
+            <option value="torus">14. 3Dドーナツ(トーラス)</option>
+            <option value="helix">15. 巨大円錐らせんタワー</option>
+            <option value="fountain">16. 重力噴水シミュレータ</option>
+            <option value="grid3d">17. 3次元ボクセル結晶格子</option>
+            <option value="vortex">18. 水平二重渦シミュレーション</option>
+            <option value="mobius">19. メビウスの輪ループ構造</option>
+            <option value="wave2">20. 干渉干渉二源重畳波</option>
+            <option value="sphere">21. 数理球面ランダムノイズ</option>
+            <option value="sinebomb">22. サイン球体脈動爆弾</option>
+            <option value="pulsar">23. パルサー宇宙パルス波動</option>
+            <option value="zigzag">24. ジグザグ3D雷撃グリッド</option>
+            <option value="hyper">25. 双曲線ハイパーボロイド</option>
+        </select>
+    </div>
+    <div>
+        <label>粒子数：</label>
+        <input type="text" id="ptsInput" value="100000">
+    </div>
+    <button id="reset" disabled>リセット</button>
+</div>
+
+<div id="canvasContainer">
+    <canvas id="stage" width="700" height="450"></canvas>
+    <div id="fps">待機中...<br>「演算スタート」を押してください</div>
+</div>
+
+<script>
+    // フロントエンドメイン制御スクリプト
+    const canvas = document.getElementById('stage'); const ctx = canvas.getContext('2d');
+    const fpsCounter = document.getElementById('fps'); const algo = document.getElementById('algo');
+    const ptsInput = document.getElementById('ptsInput'); const reset = document.getElementById('reset'); const start = document.getElementById('start');
+
+    let fpsFrames = 0; let fpsLastUpdate = performance.now(); let isWaiting = false; let isRunning = false; let ay = 0;
+
+    function sync() { 
+        if (!isRunning) return; 
+        let num = parseInt(ptsInput.value) || 10000;
+        worker.postMessage({ cmd: 'init', mode: algo.value, size: num }); 
+    }
+    algo.onchange = sync; reset.onclick = sync;
+
+    start.onclick = () => { start.disabled = true; reset.disabled = false; isRunning = true; sync(); tick(); };
+
+    function tick() {
+        if (!isRunning) return; const now = performance.now(); fpsFrames++;
+        if (now - fpsLastUpdate >= 1000) {
+            let num = parseInt(ptsInput.value) || 10000;
+            fpsCounter.innerHTML = `FPS: ${fpsFrames}<br>粒子: ${num.toLocaleString()} 点`;
+            fpsCounter.style.color = fpsFrames < 20 ? '#ff3355' : fpsFrames < 50 ? '#ffcc00' : '#00ffaa';
+            fpsFrames = 0; fpsLastUpdate = now;
+        }
+        if (!isWaiting) { worker.postMessage({ cmd: 'calc', mode: algo.value, time: now / 1000 }); isWaiting = true; }
+        requestAnimationFrame(tick);
+    }
+
+    // -------------------------------------------------------------
+    // 【重要】ここに次の回答の【2回目：後半コード】をそのまま貼り付けます
+    // -------------------------------------------------------------
+    // バックグラウンド物理演算（Web Workerロジック：25種類のアルゴリズム完全記述）
+    const workerCode = `
+        let count = 100000; let pts = new Float32Array(0); let vls = new Float32Array(0);
+        function init(newCount, mode) {
+            count = newCount; pts = new Float32Array(count * 3); vls = new Float32Array(count * 3);
+            let idx = 0;
+            for(let i=0; i<count; i++) {
+                let r = Math.random()*150; let t = Math.random()*Math.PI*2; let p = Math.acos(Math.random()*2-1);
+                pts[idx]=r*Math.sin(p)*Math.cos(t); pts[idx+1]=r*Math.sin(p)*Math.sin(t); pts[idx+2]=r*Math.cos(p);
+                vls[idx]=(Math.random()-0.5)*2; vls[idx+1]=(Math.random()-0.5)*2; vls[idx+2]=(Math.random()-0.5)*2; idx+=3;
+            }
+        }
+        self.onmessage = function(e) {
+            const { cmd, mode, size, time } = e.data;
+            if (cmd === 'init') { init(size, mode); return; }
+            let idx = 0;
+            for (let i = 0; i < count; i++) {
+                let px = pts[idx], py = pts[idx+1], pz = pts[idx+2]; let vx = vls[idx], vy = vls[idx+1], vz = vls[idx+2];
+                switch(mode) {
+                    case 'fluid': vx+=Math.sin(py*0.03+time)*0.2; vy+=Math.cos(px*0.03-time)*0.2; vz+=Math.sin(pz*0.03+time)*0.2; vx*=0.96; vy*=0.96; vz*=0.96; px+=vx; py+=vy; pz+=vz; break;
+                    case 'lorenz': px+=10*(py-px)*0.0075; py+=(px*(28-pz)-py)*0.0075; pz+=(px*py-(8/3)*pz)*0.0075; if(Math.abs(px)>300){px/=2;py/=2;pz/=2;} break;
+                    case 'blackhole': let d=Math.sqrt(px*px+py*py+pz*pz)+1; vx-=px*(50/(d*d)); vy-=py*(50/(d*d)); vz-=pz*(50/(d*d)); px+=vx; py+=vy; pz+=vz; if(d<5){px=(Math.random()-0.5)*300;py=(Math.random()-0.5)*300;pz=(Math.random()-0.5)*300;vx=0;vy=0;vz=0;} break;
+                    case 'wave3d': let g=Math.ceil(Math.sqrt(count)); px=((i%g)/g-0.5)*300; pz=(Math.floor(i/g)/g-0.5)*300; py=Math.sin(px*0.05+time)*40+Math.cos(pz*0.05+time)*40; break;
+                    case 'dna': let ad=(i/count)*Math.PI*40+time; let hd=(i/count)*300-150; let sd=i%2?0:Math.PI; px=Math.sin(ad+sd)*40; py=hd; pz=Math.cos(ad+sd)*40; break;
+                    case 'galaxy': let r2=Math.sqrt(px*px+pz*pz)+1; let sp=2/(Math.sqrt(r2)*0.1); let c=Math.cos(sp*0.01),sn=Math.sin(sp*0.01); px=px*c-pz*sn; pz=px*sn+pz*c; py+=(Math.random()-0.5)*0.5; break;
+                    case 'cloth': vy-=0.1; py+=vy; if(py<-150){py=-150;vy*=-0.2;} py+=Math.sin(px*0.05+time)*0.2; break;
+                    case 'matrix': px+=vx*0.5; py+=vy*0.5; pz+=vz*0.5; if(Math.abs(px)>120){vx*=-1;px=Math.sign(px)*120;} if(Math.abs(py)>120){vy*=-1;py=Math.sign(py)*120;} if(Math.abs(pz)>120){vz*=-1;pz=Math.sign(pz)*120;} break;
+                    case 'explosion': px+=vx*4; py+=vy*4; pz+=vz*4; vx*=0.99; vy*=0.99; vz*=0.99; if(Math.abs(px)>250||Math.abs(py)>250){px=0;py=0;pz=0;vx=(Math.random()-0.5)*4;vy=(Math.random()-0.5)*4;vz=(Math.random()-0.5)*4;} break;
+                    case 'tornado': let hy=py+150; let rt=(hy*0.5)+10; let at=time*2+i*0.01; px=Math.sin(at)*rt; pz=Math.cos(at)*rt; py+=1.5; if(py>150){py=-150;} break;
+                    case 'rossler': px+=(-py-pz)*0.015; py+=(px+0.2*py)*0.015; pz+=(0.2+pz*(px-5.7))*0.015; if(Math.abs(px)>300){px=0;py=0;pz=0;} break;
+                    case 'clifford': let na=-1.4,nb=1.6,nc=1.0,nd=0.7; px=Math.sin(na*py)+nc*Math.cos(na*px); py=Math.sin(nb*px)+nd*Math.cos(nb*py); px*=100; py*=100; break;
+                    case 'heart': let ht=i/count*Math.PI*2; px=16*Math.pow(Math.sin(ht),3)*8; py=(13*Math.cos(ht)-5*Math.cos(2*ht)-2*Math.cos(3*ht)-Math.cos(4*ht))*8; pz=Math.sin(time+i)*20; break;
+                    case 'torus': let tu=(i/count)*Math.PI*2; let tv=(i%100)/100*Math.PI*2+time; px=(100+40*Math.cos(tv))*Math.cos(tu); pz=(100+40*Math.cos(tv))*Math.sin(tu); py=40*Math.sin(tv); break;
+                    case 'helix': let ha=(i/count)*Math.PI*60+time; let hr=(i/count)*120; px=Math.sin(ha)*hr; pz=Math.cos(ha)*hr; py=(i/count)*300-150; break;
+                    case 'fountain': py+=vy*2-1; vy-=0.05; if(py<-150){px=0;py=-150;pz=0;vx=(Math.random()-0.5)*3;vy=Math.random()*4+2;vz=(Math.random()-0.5)*3;} px+=vx; pz+=vz; break;
+                    case 'grid3d': let s3=Math.ceil(Math.cbrt(count)); px=((i%s3)/s3-0.5)*250; py=((Math.floor(i/s3)%s3)/s3-0.5)*250; pz=((Math.floor(i/(s3*s3)))/s3-0.5)*250; px+=Math.sin(time+py)*2; break;
+                    case 'vortex': let rV=Math.sqrt(px*px+pz*pz)+1; vx+=(-pz/rV)*0.5; vz+=(px/rV)*0.5; px+=vx; pz+=vz; vx*=0.98; vz*=0.98; break;
+                    case 'mobius': let mu=(i/count)*Math.PI*2; let mv=(i%50)/50-0.5; let mw=100+mv*Math.cos(mu/2); px=mw*Math.cos(mu+time); pz=mw*Math.sin(mu+time); py=mv*Math.sin(mu/2)*40; break;
+                    case 'wave2': let g2=Math.ceil(Math.sqrt(count)); px=((i%g2)/g2-0.5)*300; pz=(Math.floor(i/g2)/g2-0.5)*300; py=Math.sin(Math.sqrt((px-50)**2+pz**2)*0.08+time*3)*20 + Math.sin(Math.sqrt((px+50)**2+pz**2)*0.08-time*2)*20; break;
+                    case 'sphere': let su=(i/count)*Math.PI*2; let sv=Math.acos((i%200)/100-1); let sr=130+Math.sin(su*5+time)*10; px=sr*Math.sin(sv)*Math.cos(su); py=sr*Math.sin(sv)*Math.sin(su); pz=sr*Math.cos(sv); break;
+                    case 'sinebomb': let bR=120+Math.sin(time*5)*30; let bu=(i/count)*Math.PI*2; let bv=(i%100)/50*Math.PI; px=bR*Math.sin(bv)*Math.cos(bu); py=bR*Math.sin(bv)*Math.sin(bu); pz=bR*Math.cos(bv); break;
+                    case 'pulsar': px+=vx; py+=vy; pz+=vz; let pD=Math.sqrt(px*px+py*py+pz*pz); if(pD>180||pD<20){vx*=-1;vy*=-1;vz*=-1;} break;
+                    case 'zigzag': px+=vx; py+=vy; pz+=vz; if(Math.random()<0.02){vx=(Math.random()-0.5)*8;vy=(Math.random()-0.5)*8;vz=(Math.random()-0.5)*8;} if(Math.abs(px)>150){px=0;} if(Math.abs(py)>150){py=0;} if(Math.abs(pz)>150){pz=0;} break;
+                    case 'hyper': let hu=(i/count)*Math.PI*2; let hv=(i%100)/50-1; px=40*Math.sqrt(1+hv*hv)*Math.cos(hu+time); pz=40*Math.sqrt(1+hv*hv)*Math.sin(hu+time); py=hv*130; break;
+                }
+                pts[idx]=px; pts[idx+1]=py; pts[idx+2]=pz; vls[idx]=vx; vls[idx+1]=vy; vls[idx+2]=vz; idx+=3;
+            }
+            let out = new Float32Array(pts); self.postMessage({ points: out }, [out.buffer]);
+        };
+    `;
+
+    // データの受信および画面への2D透視投影レンダリング
+    const blob = new Blob([workerCode], { type: 'application/javascript' });
+    const worker = new Worker(URL.createObjectURL(blob));
+
+    worker.onmessage = function(e) {
+        if (!isRunning) return; isWaiting = false; const points = e.data.points; ctx.fillStyle = '#050508'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ay += 0.005; const cy = Math.cos(ay), sy = Math.sin(ay), cx = Math.cos(0.4), sx = Math.sin(0.4);
+        
+        const m = algo.value;
+        ctx.fillStyle = m==='fluid'?'rgba(0,191,255,0.25)':m==='lorenz'?'rgba(255,0,128,0.3)':m==='blackhole'?'rgba(155,77,255,0.25)':m==='wave3d'?'rgba(0,255,170,0.2)':m==='dna'?'rgba(255,230,0,0.35)':m==='galaxy'?'rgba(0,255,255,0.2)':m==='cloth'?'rgba(200,200,255,0.25)':m==='matrix'?'rgba(0,255,0,0.35)':m==='explosion'?'rgba(255,77,0,0.3)':'rgba(240,240,240,0.2)';
+
+        for (let i = 0; i < points.length; i += 3) {
+            let rx = points[i]*cy - points[i+2]*sy; let rz = points[i]*sy + points[i+2]*cy;
+            let ry = points[i+1]*cx - rz*sx; let rz2 = points[i+1]*sx + rz*cx;
+            const rotZ = rz2 + 550; if (rotZ <= 30) continue;
+            const sc = 500 / rotZ; const sx2 = 350 + rx*sc; const sy2 = 225 + ry*sc;
+            if (sx2 >= 0 && sx2 < canvas.width && sy2 >= 0 && sy2 < canvas.height) { ctx.fillRect(sx2, sy2, 1, 1); }
+        }
+    };
+</script>
+</body>
+</html>
